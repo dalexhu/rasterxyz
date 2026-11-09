@@ -37,10 +37,10 @@ cargo run --release --locked -- survey.png survey-tiles --native --workers 8 --m
 
 Keep a `.jgw` (JPEG), `.pgw` (PNG), or `.wld` beside the image. Provide
 CRS metadata in a matching `.prj` or in the `SRS` element of an
-image-specific `.aux.xml`. The prototype recognizes the WKT names for NAD83 /
-UTM zone 12N and geographic WGS 84. For the existing compound JPEG metadata,
-it uses the horizontal UTM component. It does not interpret arbitrary WKT
-projection parameters or datum shifts.
+image-specific `.aux.xml`. The prototype checks the WKT definition against NAD83 /
+UTM zone 12N or geographic WGS 84. For supported compound metadata it uses
+the horizontal component. Other definitions and imagery crossing the
+antimeridian are rejected.
 
 The backend samples source pixels with nearest-neighbor resampling at all
 zoom levels. Pixels outside the source footprint are transparent and source
@@ -50,7 +50,8 @@ memory, with a 2 GiB decode buffer budget. Indexed PNG retains its palette
 indices in memory rather than expanding the full image to RGBA.
 
 With a release build and GDAL on PATH, run `python tests/native_e2e.py` to
-compare both backends with synthetic JPEG and PNG inputs. The script generates
+compare both backends with synthetic JPEG and PNG inputs. CI runs this on
+Windows, macOS and Linux. The script generates
 its inputs and output in temporary directories.
 
 ### Forthills benchmark

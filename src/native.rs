@@ -117,39 +117,7 @@ fn read_projection(path: &Path) -> Result<Proj, Box<dyn Error>> {
         Err(error) => return Err(error.into()),
     };
 
-    // The existing PAM files use compound CRS metadata. Tiling uses its horizontal
-    // projected CRS, so the vertical component has no effect on pixel coordinates.
-    let text = text.trim_start();
-    let horizontal = if text.starts_with("COMPOUNDCRS[") || text.starts_with("COMPD_CS[") {
-        ["PROJCRS[", "PROJCS["]
-            .into_iter()
-            .filter_map(|prefix| text.find(prefix))
-            .min()
-            .map(|index| &text[index..])
-            .ok_or("compound CRS has no supported projected component")?
-    } else {
-        text
-    };
-    let name = horizontal
-        .split_once('"')
-        .and_then(|(_, rest)| rest.split_once('"'))
-        .map(|(name, _)| {
-            name.chars()
-                .filter(|ch| ch.is_ascii_alphanumeric())
-                .collect::<String>()
-                .to_ascii_lowercase()
-        })
-        .unwrap_or_default();
-    let proj = match name.as_str() {
-        "nad83utmzone12n" | "nad1983utmzone12n" => "+proj=utm +zone=12 +ellps=GRS80 +towgs84=0,0,0",
-        "wgs84" | "gcswgs1984" if horizontal.starts_with("GEOG") => "+proj=longlat +datum=WGS84",
-        _ => {
-            return Err(
-                "unsupported CRS; expected NAD83 / UTM zone 12N or geographic WGS 84".into(),
-            )
-        }
-    };
-    Ok(Proj::from_proj_string(proj)?)
+    crate::crs::parse(&text)
 }
 
 pub fn render(
@@ -219,6 +187,9 @@ pub fn render(
             let x = a * col + b * row + c;
             let y = d * col + e * row + f;
             let (x, y) = if source.is_latlong() {
+                if !(-180.0..=180.0).contains(&x) {
+                    return Err("imagery crossing the antimeridian is unsupported".into());
+                }
                 (x.to_radians(), y.to_radians())
             } else {
                 (x, y)
@@ -229,6 +200,11 @@ pub fn render(
             south = south.min(y);
             north = north.max(y);
         }
+    }
+    if !source.is_latlong() && east - west > HALF_WORLD {
+        return Err(
+            "projected footprints spanning the antimeridian or over 180° are unsupported".into(),
+        );
     }
     if ![west, east, south, north].iter().all(|v| v.is_finite())
         || east <= -HALF_WORLD

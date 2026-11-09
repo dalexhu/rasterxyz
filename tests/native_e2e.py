@@ -2,8 +2,10 @@
 
 import os
 from pathlib import Path
+import struct
 import subprocess
 import tempfile
+import zlib
 
 from gdal_e2e import read_pixel
 
@@ -65,12 +67,72 @@ def check(binary, folder, kind, crs, transform, samples, sidecar_crs=None):
     print(f"{kind}: {len(tiles(native))} matching XYZ paths, 8 matching RGBA samples", flush=True)
 
 
+def check_palette_and_retry(binary, folder):
+    folder.mkdir()
+    source = folder / "indexed.png"
+    world = source.with_suffix(".pgw")
+    crs = source.with_suffix(".prj")
+    output = folder / "tiles"
+
+    def chunk(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data))
+
+    # Three index values with zero, partial and full opacity.
+    row = b"\x00" + bytes([0]) * 32 + bytes([1]) * 32 + bytes([2]) * 64
+    source.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">2I5B", 128, 128, 8, 3, 0, 0, 0))
+        + chunk(b"PLTE", bytes((255, 0, 0, 0, 255, 0, 0, 0, 255)))
+        + chunk(b"tRNS", bytes((0, 128, 255)))
+        + chunk(b"IDAT", zlib.compress(row * 128))
+        + chunk(b"IEND", b"")
+    )
+    wkt = subprocess.check_output(["gdalsrsinfo", "-o", "wkt_esri", "EPSG:4326"], text=True)
+    args = [
+        str(binary), str(source), str(output), "--native", "--workers", "4",
+        "--min-zoom", "3", "--max-zoom", "3",
+    ]
+    env = {**os.environ, "RASTERXYZ_GDAL": str(folder / "nonexistent-gdal")}
+
+    def fails_with(message):
+        result = subprocess.run(args, env=env, capture_output=True, text=True)
+        assert result.returncode != 0 and message in result.stderr, result.stderr
+        assert not output.exists(), output
+
+    # Changing the definition without changing its display name must fail.
+    world.write_text("0.3125\n0\n0\n-0.234375\n-69.84375\n54.8828125\n", encoding="utf-8")
+    crs.write_text(wkt.replace("6378137", "6378130"), encoding="utf-8")
+    fails_with("unsupported CRS definition")
+
+    # Likewise for a projected CRS with a misleading, otherwise supported name.
+    utm = subprocess.check_output(["gdalsrsinfo", "-o", "wkt_esri", "EPSG:26912"], text=True)
+    assert "-111" in utm
+    crs.write_text(utm.replace("-111", "-110"), encoding="utf-8")
+    fails_with("unsupported CRS definition")
+
+    # A valid CRS with an image crossing 180° must fail and free the output path.
+    crs.write_text(wkt, encoding="utf-8")
+    crossing = "0.3125\n0\n0\n-0.234375\n175.15625\n54.8828125\n"
+    world.write_text(crossing, encoding="utf-8")
+    fails_with("antimeridian")
+
+    world.write_text("0.3125\n0\n0\n-0.234375\n-69.84375\n54.8828125\n", encoding="utf-8")
+    subprocess.run(args, env=env, check=True)
+    assert read_pixel(output, 3, -61, 48) == (0, 0, 0, 0)
+    assert read_pixel(output, 3, -55, 48) == (0, 255, 0, 128)
+    assert read_pixel(output, 3, -40, 48) == (0, 0, 255, 255)
+    assert read_pixel(output, 3, -25, 34) == (0, 0, 0, 0)
+    print("Indexed PNG alpha, invalid CRS and antimeridian rejection, and retry passed")
+
+
+
 def main():
     binary = Path(__file__).resolve().parents[1] / "target" / "release" / (
         "rasterxyz.exe" if os.name == "nt" else "rasterxyz"
     )
     with tempfile.TemporaryDirectory(prefix="rasterxyz-native-") as tmp:
         folder = Path(tmp)
+        check_palette_and_retry(binary, folder / "indexed")
         check(
             binary, folder / "jpeg", "jpg", "EPSG:4326",
             (0.3125, 0, 0, -0.234375, -70 + 0.3125 / 2, 55 - 0.234375 / 2),

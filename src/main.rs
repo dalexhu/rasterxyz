@@ -1,3 +1,4 @@
+mod crs;
 mod native;
 
 use clap::Parser;
@@ -99,10 +100,7 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
                 return Err(format!("GDAL tile generation failed ({status})").into());
             }
         }
-        for entry in fs::read_dir(tiles)? {
-            let entry = entry?;
-            fs::rename(entry.path(), output.join(entry.file_name()))?;
-        }
+        publish_tiles(&tiles, &output)?;
         Ok(())
     })();
     if result.is_err() {
@@ -110,6 +108,70 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         let _ = fs::remove_dir(&output);
     }
     result
+}
+
+fn publish_tiles(tiles: &std::path::Path, output: &std::path::Path) -> io::Result<()> {
+    let mut entries = fs::read_dir(tiles)?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<io::Result<Vec<_>>>()?;
+    entries.sort_unstable();
+    for (index, name) in entries.iter().enumerate() {
+        let destination = output.join(name);
+        let moved = match fs::symlink_metadata(&destination) {
+            Ok(_) => Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "tile destination already exists",
+            )),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                fs::rename(tiles.join(name), destination)
+            }
+            Err(error) => Err(error),
+        };
+        if let Err(error) = moved {
+            let mut rollback_error = None;
+            for previous in entries[..index].iter().rev() {
+                if let Err(error) = fs::rename(output.join(previous), tiles.join(previous)) {
+                    rollback_error.get_or_insert(error);
+                }
+            }
+            return Err(match rollback_error {
+                Some(rollback) => io::Error::other(format!(
+                    "tile publication failed: {error}; rollback failed: {rollback}"
+                )),
+                None => error,
+            });
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_publication_rolls_back_moved_levels_and_can_retry() -> io::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let staged = temp.path().join("staged");
+        let output = temp.path().join("output");
+        fs::create_dir_all(staged.join("14"))?;
+        fs::create_dir_all(staged.join("17"))?;
+        fs::write(staged.join("14/fixture"), b"staged")?;
+        fs::create_dir(&output)?;
+        fs::write(output.join("17"), b"preexisting")?;
+
+        let error = publish_tiles(&staged, &output).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert!(!output.join("14").exists());
+        assert_eq!(fs::read(output.join("17"))?, b"preexisting");
+        assert_eq!(fs::read(staged.join("14/fixture"))?, b"staged");
+
+        fs::remove_file(output.join("17"))?;
+        publish_tiles(&staged, &output)?;
+        assert_eq!(fs::read(output.join("14/fixture"))?, b"staged");
+        assert!(output.join("17").is_dir());
+        Ok(())
+    }
 }
 
 fn main() -> ExitCode {

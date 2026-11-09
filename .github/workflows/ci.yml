@@ -18,3 +18,4 @@ jobs:
           create-args: gdal=3.13.3
           init-shell: none
       - run: micromamba run -n rasterxyz-ci python tests/gdal_e2e.py
+      - run: micromamba run -n rasterxyz-ci python tests/native_e2e.py
