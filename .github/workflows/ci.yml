@@ -12,3 +12,9 @@ jobs:
       - run: rustup update stable
       - run: cargo build --release --locked
       - run: cargo test --locked
+      - uses: mamba-org/setup-micromamba@v3
+        with:
+          environment-name: rasterxyz-ci
+          create-args: gdal=3.13.3
+          init-shell: none
+      - run: micromamba run -n rasterxyz-ci python tests/gdal_e2e.py

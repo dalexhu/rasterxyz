@@ -20,6 +20,6 @@ GeoTIFF can carry its georeferencing internally. For JPEG or PNG, keep the corre
 
 Tiles are written as `z/x/y.png` with 256-pixel edges, a north-origin Y axis and transparent areas outside the source coverage. Fully blank tiles are skipped. PNG compression defaults to 3. Choose a new output directory whose parent exists. Rerunning against an existing output directory fails without replacing it. Use the output only after the process exits successfully.
 
-`cargo test --locked` checks the CLI output directory safeguards. The CI matrix builds and tests the Rust CLI on all three operating systems.
+`cargo test --locked` checks the CLI output directory safeguards. The CI matrix builds and tests the Rust CLI on all three operating systems, then runs GDAL against a synthetic raster to check XYZ paths, coordinate alignment and transparent edges. With Python and GDAL on PATH, run `python tests/gdal_e2e.py` after the release build to repeat this check locally.
 
 [GDAL raster tile documentation](https://gdal.org/en/stable/programs/gdal_raster_tile.html) · [GDAL downloads](https://gdal.org/en/stable/download.html)
