@@ -26,20 +26,13 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     if options.min_zoom > options.max_zoom {
         return Err("--min-zoom must be at most --max-zoom".into());
     }
-    let input = options.input.canonicalize()?;
+    // GDAL does not consistently handle the Windows verbatim paths from canonicalize.
+    let input = std::path::absolute(&options.input)?;
     if !input.is_file() {
         return Err("input must be a raster file".into());
     }
 
-    let output = env::current_dir()?.join(&options.output);
-    let name = output
-        .file_name()
-        .ok_or("output must name a new directory")?;
-    let parent = output
-        .parent()
-        .ok_or("output must have a parent")?
-        .canonicalize()?;
-    let output = parent.join(name);
+    let output = std::path::absolute(&options.output)?;
     // Reserve the target so concurrent runs cannot publish to the same directory.
     fs::create_dir(&output)?;
 
