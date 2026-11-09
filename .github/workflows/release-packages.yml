@@ -1,0 +1,39 @@
+name: Release packages
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'codex/release-prep-*'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: rustup update stable
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - run: python scripts/package_release.py ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rasterxyz-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
