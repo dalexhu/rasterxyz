@@ -1,0 +1,11 @@
+[package]
+name = "rasterxyz"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Generate Web Mercator XYZ PNG tiles from georeferenced rasters"
+repository = "https://github.com/dalexhu/rasterxyz"
+
+[dependencies]
+clap = { version = "4.6", features = ["derive"] }
+tempfile = "3.27"
